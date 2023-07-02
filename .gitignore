@@ -30,3 +30,8 @@
 *.exe
 *.out
 *.app
+.vs/
+*.txt
+GenerateFile/obj/Debug/net6.0/GenerateFile.GeneratedMSBuildEditorConfig.editorconfig
+GenerateFile/obj/GenerateFile.csproj.nuget.dgspec.json
+GenerateFile/obj/project.assets.json
