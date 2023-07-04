@@ -1,28 +1,43 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
-
+﻿
 namespace FileSortingApp
 {
     class Program
     {
-        static void Main(string[] args)
+        public static void Main()
         {
-            Console.WriteLine("Enter the path of the input file:");
+            Console.WriteLine("Enter the path to the input file:");
             string inputFilePath = Console.ReadLine();
 
-            Console.WriteLine("Enter the name of the output file:");
-            string outputFileName = Console.ReadLine();
-            string outputFilePath = Path.Combine(Path.GetDirectoryName(inputFilePath), outputFileName);
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            Console.WriteLine("Sorting file in progress...");
-            FileSorter.SortFile(inputFilePath, outputFilePath);
-            stopwatch.Stop();
-            Console.WriteLine($"Time spent during file sorting: {stopwatch.Elapsed.TotalSeconds} seconds");
-            Console.WriteLine("Press any key to exit.");
-            Console.ReadKey();
+            try
+            {
+                string outputFilePath = "sortedResult.txt";
+                SortFile(inputFilePath, outputFilePath);
+
+                Utilities.WriteWithTime("Sort completed successfully.");
+                Console.WriteLine("Output file: " + outputFilePath);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("An error occurred during sorting: " + ex.Message);
+            }
+
+            Console.ReadLine();
+        }
+
+
+        public static void SortFile(string inputFilePath, string outputFilePath)
+        {
+            long fileSize = new FileInfo(inputFilePath).Length;
+
+            if (fileSize > 2.5 * 1024 * 1024 * 1024) // Greater than 2.5 GB
+            {
+                long chunkSize = Utilities.CalculateChunkSize(fileSize);
+                Sort.SortFileWithChunking(inputFilePath, outputFilePath, chunkSize);
+            }
+            else
+            {
+                Sort.SortFileInMemory(inputFilePath, outputFilePath);
+            }
         }
     }
 }
