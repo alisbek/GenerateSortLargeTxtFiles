@@ -5,24 +5,100 @@ using System.Linq;
 
 namespace FileSortingApp
 {
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            Programe.Maind();
+           
+        }
+
+        static void runner()
+        {
+            Console.WriteLine("Enter the path of the input file:");
+            string inputFilePath = "10.txt";// Console.ReadLine();
+
+            Console.WriteLine("Enter the name of the output file:");
+            string outputFileName = "out10.txt";// Console.ReadLine();
+            string outputFilePath = Path.Combine(Path.GetDirectoryName(inputFilePath), outputFileName);
+
+            FileSorter.SortFile(inputFilePath, outputFilePath);
+
+            Console.WriteLine("Sorting completed. Press any key to exit.");
+            Console.ReadKey();
+        }
+    }
+
     public static class FileSorter
     {
         private const long MaxMemorySizeForInMemorySort = 2_500_000_000; // 2.5 GB
         private const int DefaultChunkSize = 100_000; // Default chunk size if estimation is not possible
+        private const int NumberOfParts = 2000; // Divide the file into 10 parts initially
 
         public static void SortFile(string inputFilePath, string outputFilePath)
         {
             var fileSize = new FileInfo(inputFilePath).Length;
-            var chunkSize = GetChunkSize(fileSize);
 
-            if (chunkSize < fileSize)
-            {
-                SortLargeFile(inputFilePath, outputFilePath, chunkSize);
-            }
-            else
+            if (fileSize <= MaxMemorySizeForInMemorySort)
             {
                 SortSmallFile(inputFilePath, outputFilePath);
             }
+            else
+            {
+                var partSize = fileSize / NumberOfParts;
+                var partFiles = DivideIntoParts(inputFilePath, partSize);
+                var chunkSize = GetChunkSize(partSize);
+
+                var sortedChunks = new List<string>();
+
+                try
+                {
+                    foreach (var partFile in partFiles)
+                    {
+                        var chunkFiles = SplitIntoChunks(partFile, chunkSize);
+                        var sortedChunkFiles = SortChunks(chunkFiles);
+                        sortedChunks.AddRange(sortedChunkFiles);
+                    }
+
+                    MergeSortedChunks(sortedChunks, outputFilePath);
+                }
+                finally
+                {
+                    // Delete temporary files
+                    DeleteTempFiles(partFiles);
+                    DeleteTempFiles(sortedChunks);
+                }
+            }
+        }
+
+        private static List<string> DivideIntoParts(string inputFilePath, long partSize)
+        {
+            var partFiles = new List<string>();
+
+            using (var reader = new StreamReader(inputFilePath))
+            {
+                for (int i = 0; i < NumberOfParts; i++)
+                {
+                    var partFile = Path.Combine(Path.GetDirectoryName(inputFilePath), $"part_{i}.txt");
+                    partFiles.Add(partFile);
+
+                    using (var writer = new StreamWriter(partFile))
+                    {
+                        var fileSize = 0L;
+                        string line;
+                        long readLine = 0;
+                        while ((line = reader.ReadLine()) != null && fileSize < partSize)
+                        {
+                            if (++readLine % 5000 == 0)
+                                Console.Write("{0:f2}%   \r", 100.0 * reader.BaseStream.Position / reader.BaseStream.Length);
+                            writer.WriteLine(line);
+                            fileSize += line.Length + Environment.NewLine.Length;
+                        }
+                    }
+                }
+            }
+
+            return partFiles;
         }
 
         private static int GetChunkSize(long fileSize)
@@ -34,107 +110,109 @@ namespace FileSortingApp
             return Math.Max(chunkSize, DefaultChunkSize);
         }
 
-        private static void SortLargeFile(string inputFilePath, string outputFilePath, int chunkSize)
+        private static List<string> SplitIntoChunks(string inputFilePath, int chunkSize)
         {
             var chunkFiles = new List<string>();
 
-            try
+            using (var reader = new StreamReader(inputFilePath))
             {
-                // Divide the input file into smaller chunks
-                using (var reader = new StreamReader(inputFilePath))
+                string line;
+                int chunkNumber = 0;
+                long readLine = 0;
+                while ((line = reader.ReadLine()) != null)
                 {
-                    string line;
-                    int chunkNumber = 0;
+                    var chunkLines = new List<string> { line };
 
-                    while ((line = reader.ReadLine()) != null)
+                    while (chunkLines.Count < chunkSize && (line = reader.ReadLine()) != null)
                     {
-                        var chunkLines = new List<string> { line };
-
-                        while (chunkLines.Count < chunkSize && (line = reader.ReadLine()) != null)
-                        {
-                            chunkLines.Add(line);
-                        }
-
-                        chunkLines.Sort(new LineComparer());
-
-                        var chunkFile = Path.Combine(Path.GetDirectoryName(inputFilePath), $"chunk_{chunkNumber}.txt");
-                        File.WriteAllLines(chunkFile, chunkLines);
-                        Console.WriteLine($"chunk_{chunkNumber}.txt");
-                        chunkFiles.Add(chunkFile);
-                        chunkNumber++;
+                        chunkLines.Add(line);
                     }
-                }
 
-                // Merge the sorted chunks
-                MergeSortedChunks(chunkFiles, outputFilePath);
+                    chunkLines.Sort(new LineComparer());
+                    
+                    if (++readLine % 5000 == 0)
+                        Console.Write("{0:f2}%   \r", 100.0 * reader.BaseStream.Position / reader.BaseStream.Length);
+
+                    var chunkFile = Path.Combine(Path.GetDirectoryName(inputFilePath), $"chunk_{Path.GetFileNameWithoutExtension(inputFilePath)}_{chunkNumber}.txt");
+                    File.WriteAllLines(chunkFile, chunkLines);
+
+                    chunkFiles.Add(chunkFile);
+                    chunkNumber++;
+                }
             }
-            finally
+
+            return chunkFiles;
+        }
+
+        public static List<string> SortChunks(List<string> chunkFiles)
+        {
+            var sortedChunkFiles = new List<string>();
+
+            foreach (var chunkFile in chunkFiles)
             {
-                // Delete the temporary chunk files
-                DeleteTempChunks(chunkFiles);
+                var lines = File.ReadAllLines(chunkFile);
+                Array.Sort(lines, new LineComparer());
+
+                var sortedChunkFile = Path.Combine(Path.GetDirectoryName(chunkFile), $"sorted_{Path.GetFileName(chunkFile)}");
+                File.WriteAllLines(sortedChunkFile, lines);
+                Console.WriteLine($"sorted_{Path.GetFileName(chunkFile)}");
+                sortedChunkFiles.Add(sortedChunkFile);
             }
+
+            return sortedChunkFiles;
         }
 
         private static void MergeSortedChunks(List<string> chunkFiles, string outputFilePath)
         {
-            var lineReaders = new List<ChunkLineReader>();
-            var outputWriter = new StreamWriter(outputFilePath);
-
-            try
+            using (var outputWriter = new StreamWriter(outputFilePath))
             {
-                // Initialize the line readers for each chunk
-                foreach (var chunkFile in chunkFiles)
-                {
-                    lineReaders.Add(new ChunkLineReader(chunkFile));
-                }
+                var readers = new List<ChunkLineReader>();
 
-                var heap = new MinHeap<ChunkLineReader>(lineReaders.Count);
-
-                // Insert the first line from each chunk into the heap
-                foreach (var lineReader in lineReaders)
+                try
                 {
-                    if (!lineReader.EndOfStream)
+                    // Initialize the line readers
+                    foreach (var chunkFile in chunkFiles)
                     {
-                        heap.Insert(lineReader);
+                        var reader = new ChunkLineReader(chunkFile);
+                        readers.Add(reader);
+                    }
+
+                    // Create a min heap to track the minimum line from each chunk
+                    var heap = new MinHeap<ChunkLineReader>(readers.Count);
+                    foreach (var reader in readers)
+                    {
+                        heap.Insert(reader);
+                    }
+
+                    // Merge the chunks
+                    while (heap.Count > 0)
+                    {
+                        var minLineReader = heap.RemoveMin();
+                        var line = minLineReader.ReadLine();
+                        outputWriter.WriteLine(line);
+
+                        if (!minLineReader.EndOfStream)
+                        {
+                            heap.Insert(minLineReader);
+                        }
                     }
                 }
-
-                // Merge the sorted chunks
-                while (heap.Count > 0)
+                finally
                 {
-                    var minLineReader = heap.RemoveMin();
-
-                    // Write the line to the output file
-                    outputWriter.WriteLine(minLineReader.ReadLine());
-
-                    // If the line reader has more lines, insert it back into the heap
-                    if (!minLineReader.EndOfStream)
+                    // Dispose the line readers
+                    foreach (var reader in readers)
                     {
-                        heap.Insert(minLineReader);
-                    }
-                    else
-                    {
-                        minLineReader.Dispose();
+                        reader.Dispose();
                     }
                 }
-            }
-            finally
-            {
-                // Dispose the line readers and close the output writer
-                foreach (var lineReader in lineReaders)
-                {
-                    lineReader.Dispose();
-                }
-
-                outputWriter.Close();
             }
         }
 
-        private static void DeleteTempChunks(List<string> chunkFiles)
+        private static void DeleteTempFiles(List<string> files)
         {
-            foreach (var chunkFile in chunkFiles)
+            foreach (var file in files)
             {
-                File.Delete(chunkFile);
+                File.Delete(file);
             }
         }
 
@@ -152,7 +230,7 @@ namespace FileSortingApp
             private readonly StreamReader _reader;
             private string _currentLine;
 
-            public bool EndOfStream => _currentLine == null;
+            public bool EndOfStream => _reader.EndOfStream;
 
             public ChunkLineReader(string filePath)
             {
@@ -213,8 +291,10 @@ namespace FileSortingApp
                 while (index > 0)
                 {
                     var parentIndex = (index - 1) / 2;
+
                     if (_items[index].CompareTo(_items[parentIndex]) >= 0)
                         break;
+
                     Swap(index, parentIndex);
                     index = parentIndex;
                 }
@@ -224,20 +304,19 @@ namespace FileSortingApp
             {
                 while (index * 2 + 1 < _size)
                 {
-                    var leftChild = index * 2 + 1;
-                    var rightChild = index * 2 + 2;
-                    var smallestChild = leftChild;
+                    var leftChildIndex = index * 2 + 1;
+                    var rightChildIndex = index * 2 + 2;
+                    var smallestChildIndex = leftChildIndex;
 
-                    if (rightChild < _size && _items[rightChild].CompareTo(_items[leftChild]) < 0)
+                    if (rightChildIndex < _size && _items[rightChildIndex].CompareTo(_items[leftChildIndex]) < 0)
                     {
-                        smallestChild = rightChild;
+                        smallestChildIndex = rightChildIndex;
                     }
 
-                    if (_items[index].CompareTo(_items[smallestChild]) <= 0)
+                    if (_items[index].CompareTo(_items[smallestChildIndex]) <= 0)
                         break;
-
-                    Swap(index, smallestChild);
-                    index = smallestChild;
+                    Swap(index, smallestChildIndex);
+                    index = smallestChildIndex;
                 }
             }
 
@@ -253,39 +332,23 @@ namespace FileSortingApp
         {
             public int Compare(string x, string y)
             {
-                var xParts = x.Split('.');
-                var yParts = y.Split('.');
+                var xParts = x.Split(new[] { '.' }, 2);
+                var yParts = y.Split(new[] { '.' }, 2);
 
-                var stringComparisonResult = string.Compare(xParts[1].Trim(), yParts[1].Trim(), StringComparison.OrdinalIgnoreCase);
+                var xString = xParts[1];
+                var yString = yParts[1];
 
-                if (stringComparisonResult == 0)
+                var xNumber = int.Parse(xParts[0]);
+                var yNumber = int.Parse(yParts[0]);
+
+                var stringComparison = string.Compare(xString, yString, StringComparison.Ordinal);
+                if (stringComparison != 0)
                 {
-                    var xNumber = int.Parse(xParts[0].Trim());
-                    var yNumber = int.Parse(yParts[0].Trim());
-
-                    return xNumber.CompareTo(yNumber);
+                    return stringComparison;
                 }
 
-                return stringComparisonResult;
+                return xNumber.CompareTo(yNumber);
             }
-        }
-    }
-
-    class Program
-    {
-        static void Main(string[] args)
-        {
-            Console.WriteLine("Enter the path of the input file:");
-            string inputFilePath = "10.txt";// Console.ReadLine();
-
-            Console.WriteLine("Enter the name of the output file:");
-            string outputFileName = "out10.txt";// Console.ReadLine();
-            string outputFilePath = Path.Combine(Path.GetDirectoryName(inputFilePath), outputFileName);
-
-            FileSorter.SortFile(inputFilePath, outputFilePath);
-
-            Console.WriteLine("Sorting completed. Press any key to exit.");
-            Console.ReadKey();
         }
     }
 }
